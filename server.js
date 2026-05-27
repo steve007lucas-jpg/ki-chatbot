@@ -12,7 +12,7 @@ app.use(express.json());
 ========================= */
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB verbunden"))
-  .catch(err => console.log("❌ DB Fehler:", err));
+  .catch(err => console.error("❌ DB Fehler:", err));
 
 /* =========================
    2. LEAD MODEL
@@ -33,8 +33,12 @@ const Lead = mongoose.model("Lead", leadSchema);
 app.post("/chat", async (req, res) => {
   const userMessage = req.body.message;
 
+  if (!userMessage) {
+    return res.json({ reply: "Keine Nachricht erhalten." });
+  }
+
   try {
-    // KI Anfrage
+    // KI REQUEST
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -46,7 +50,7 @@ app.post("/chat", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: "Du bist ein freundlicher Terminassistent. Versuche Name und Telefonnummer zu erkennen."
+            content: "Du bist ein freundlicher Terminassistent. Frage bei Bedarf nach Name und Telefonnummer."
           },
           {
             role: "user",
@@ -57,9 +61,9 @@ app.post("/chat", async (req, res) => {
     });
 
     const data = await response.json();
-    const reply = data.choices?.[0]?.message?.content || "Keine Antwort";
+    const reply = data?.choices?.[0]?.message?.content || "Keine Antwort";
 
-    // 🔥 SPEICHERN IN DATENBANK
+    // 🔥 LEAD SPEICHERN
     await Lead.create({
       message: userMessage
     });
@@ -67,14 +71,16 @@ app.post("/chat", async (req, res) => {
     res.json({ reply });
 
   } catch (error) {
-    console.error(error);
+    console.error("Fehler:", error);
     res.json({ reply: "Server Fehler" });
   }
 });
 
 /* =========================
-   4. SERVER STARTEN
+   4. SERVER START
 ========================= */
-app.listen(3000, () => {
-  console.log("🚀 Server läuft auf http://localhost:3000");
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server läuft auf Port ${PORT}`);
 });
