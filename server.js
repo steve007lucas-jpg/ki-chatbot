@@ -29,7 +29,6 @@ const Lead = mongoose.model("Lead", {
 
 // 🧠 SYSTEM PROMPT (SEHR WICHTIG)
 const SYSTEM_PROMPT = `
-const SYSTEM_PROMPT = `
 Du bist ein hochprofessioneller Terminassistent (wie ein CRM- und Buchungssystem kombiniert).
 
 DEIN HAUPTZIEL:
