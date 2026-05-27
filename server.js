@@ -1,56 +1,35 @@
-require("dotenv").config();
-
 const express = require("express");
-const mongoose = require("mongoose");
 const fetch = require("node-fetch");
+const mongoose = require("mongoose");
+const cors = require("cors");
 
 const app = express();
 app.use(express.json());
+app.use(cors());
 
-/* =========================
-   1. MONGODB VERBINDUNG
-========================= */
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB verbunden"))
-  .catch(err => console.error("❌ MongoDB Fehler:", err));
+// 🔥 HIER EINTRAGEN
+const OPENROUTER_API_KEY = "DEIN_API_KEY";
+const MONGO_URI = "DEINE_MONGODB_VERBINDUNG";
 
-/* =========================
-   2. LEAD MODEL
-========================= */
-const leadSchema = new mongoose.Schema({
+// MongoDB verbinden
+mongoose.connect(MONGO_URI);
+
+const Lead = mongoose.model("Lead", {
+  name: String,
+  phone: String,
   message: String,
-  reply: String,
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
+  date: { type: Date, default: Date.now }
 });
 
-const Lead = mongoose.model("Lead", leadSchema);
-
-/* =========================
-   3. ROUTES
-========================= */
-
-app.get("/", (req, res) => {
-  res.send("🚀 KI Server läuft erfolgreich");
-});
-
+// Chat Route
 app.post("/chat", async (req, res) => {
   const userMessage = req.body.message;
 
-  if (!userMessage) {
-    return res.json({ reply: "Keine Nachricht erhalten" });
-  }
-
   try {
-    /* =========================
-       KI REQUEST (OPENROUTER)
-    ========================= */
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -58,7 +37,18 @@ app.post("/chat", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: "Du bist ein hilfreicher Terminassistent. Antworte kurz und klar."
+            content: `
+Du bist ein professioneller Terminassistent.
+
+Deine Aufgaben:
+- Beantworte Kunden freundlich
+- Führe zur Terminbuchung
+- Frage nach Name und Telefonnummer
+- Schlage Termine vor
+
+Ziel:
+Lead generieren und Termin vereinbaren.
+`
           },
           {
             role: "user",
@@ -69,35 +59,22 @@ app.post("/chat", async (req, res) => {
     });
 
     const data = await response.json();
+    const reply = data.choices?.[0]?.message?.content || "Keine Antwort";
 
-    const reply =
-      data?.choices?.[0]?.message?.content ||
-      "Keine Antwort von KI erhalten";
+    // 🔥 einfache Lead-Erkennung
+    if (userMessage.toLowerCase().includes("mein name") || userMessage.match(/\d{5,}/)) {
+      await Lead.create({
+        name: userMessage,
+        phone: userMessage,
+        message: userMessage
+      });
+    }
 
-    /* =========================
-       SPEICHERN IN MONGODB
-    ========================= */
-    await Lead.create({
-      message: userMessage,
-      reply: reply
-    });
-
-    /* =========================
-       RESPONSE
-    ========================= */
     res.json({ reply });
 
-  } catch (error) {
-    console.error(error);
+  } catch (err) {
     res.json({ reply: "Server Fehler" });
   }
 });
 
-/* =========================
-   4. SERVER START
-========================= */
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log("🚀 Server läuft auf Port " + PORT);
-});
+app.listen(3000, () => console.log("Server läuft"));
