@@ -12,13 +12,14 @@ app.use(express.json());
 ========================= */
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB verbunden"))
-  .catch(err => console.error("❌ DB Fehler:", err));
+  .catch(err => console.error("❌ MongoDB Fehler:", err));
 
 /* =========================
    2. LEAD MODEL
 ========================= */
 const leadSchema = new mongoose.Schema({
   message: String,
+  reply: String,
   createdAt: {
     type: Date,
     default: Date.now
@@ -28,17 +29,24 @@ const leadSchema = new mongoose.Schema({
 const Lead = mongoose.model("Lead", leadSchema);
 
 /* =========================
-   3. CHAT ENDPOINT
+   3. ROUTES
 ========================= */
+
+app.get("/", (req, res) => {
+  res.send("🚀 KI Server läuft erfolgreich");
+});
+
 app.post("/chat", async (req, res) => {
   const userMessage = req.body.message;
 
   if (!userMessage) {
-    return res.json({ reply: "Keine Nachricht erhalten." });
+    return res.json({ reply: "Keine Nachricht erhalten" });
   }
 
   try {
-    // KI REQUEST
+    /* =========================
+       KI REQUEST (OPENROUTER)
+    ========================= */
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -50,7 +58,7 @@ app.post("/chat", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: "Du bist ein freundlicher Terminassistent. Frage bei Bedarf nach Name und Telefonnummer."
+            content: "Du bist ein hilfreicher Terminassistent. Antworte kurz und klar."
           },
           {
             role: "user",
@@ -61,17 +69,26 @@ app.post("/chat", async (req, res) => {
     });
 
     const data = await response.json();
-    const reply = data?.choices?.[0]?.message?.content || "Keine Antwort";
 
-    // 🔥 LEAD SPEICHERN
+    const reply =
+      data?.choices?.[0]?.message?.content ||
+      "Keine Antwort von KI erhalten";
+
+    /* =========================
+       SPEICHERN IN MONGODB
+    ========================= */
     await Lead.create({
-      message: userMessage
+      message: userMessage,
+      reply: reply
     });
 
+    /* =========================
+       RESPONSE
+    ========================= */
     res.json({ reply });
 
   } catch (error) {
-    console.error("Fehler:", error);
+    console.error(error);
     res.json({ reply: "Server Fehler" });
   }
 });
@@ -82,5 +99,5 @@ app.post("/chat", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server läuft auf Port ${PORT}`);
+  console.log("🚀 Server läuft auf Port " + PORT);
 });
