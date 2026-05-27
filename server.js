@@ -4,24 +4,54 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 
 const app = express();
+
+// Middleware
 app.use(express.json());
 app.use(cors());
 
-// 🔥 HIER EINTRAGEN
-const OPENROUTER_API_KEY = "DEIN_API_KEY";
-const MONGO_URI = "DEINE_MONGODB_VERBINDUNG";
+// 🔐 ENV Variablen (auf Render einstellen)
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const MONGO_URI = process.env.MONGO_URI;
 
-// MongoDB verbinden
-mongoose.connect(MONGO_URI);
+// 🔌 MongoDB verbinden
+mongoose.connect(MONGO_URI)
+  .then(() => console.log("✅ MongoDB verbunden"))
+  .catch(err => console.log("❌ Mongo Fehler:", err));
 
+// 📦 Datenbank Modell
 const Lead = mongoose.model("Lead", {
   name: String,
   phone: String,
+  appointment: String,
   message: String,
-  date: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now }
 });
 
-// Chat Route
+// 🧠 SYSTEM PROMPT (SEHR WICHTIG)
+const SYSTEM_PROMPT = `
+Du bist ein professioneller KI Terminassistent für Unternehmen.
+
+Deine Aufgaben:
+- Begrüße den Kunden freundlich
+- Stelle Fragen um den Bedarf zu verstehen
+- Führe gezielt zur Terminbuchung
+- Frage IMMER nach:
+  - Name
+  - Telefonnummer
+- Schlage konkrete Termine vor (z.B. morgen 14 Uhr, Freitag 10 Uhr)
+
+Wichtig:
+- Schreibe kurz, klar und professionell
+- Sei verkaufsstark
+- Ziel ist IMMER: Termin vereinbaren + Kontaktdaten sammeln
+`;
+
+// 🟢 Test Route
+app.get("/", (req, res) => {
+  res.send("🚀 Leadaro Server läuft");
+});
+
+// 💬 Chat Route
 app.post("/chat", async (req, res) => {
   const userMessage = req.body.message;
 
@@ -35,25 +65,8 @@ app.post("/chat", async (req, res) => {
       body: JSON.stringify({
         model: "openai/gpt-3.5-turbo",
         messages: [
-          {
-            role: "system",
-            content: `
-Du bist ein professioneller Terminassistent.
-
-Deine Aufgaben:
-- Beantworte Kunden freundlich
-- Führe zur Terminbuchung
-- Frage nach Name und Telefonnummer
-- Schlage Termine vor
-
-Ziel:
-Lead generieren und Termin vereinbaren.
-`
-          },
-          {
-            role: "user",
-            content: userMessage
-          }
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: userMessage }
         ]
       })
     });
@@ -61,20 +74,29 @@ Lead generieren und Termin vereinbaren.
     const data = await response.json();
     const reply = data.choices?.[0]?.message?.content || "Keine Antwort";
 
-    // 🔥 einfache Lead-Erkennung
-    if (userMessage.toLowerCase().includes("mein name") || userMessage.match(/\d{5,}/)) {
+    // 🔎 einfache Daten-Erkennung
+    const phoneMatch = userMessage.match(/\+?\d[\d\s]{5,}/);
+    const nameMatch = userMessage.match(/mein name ist (.+)/i);
+
+    if (phoneMatch || nameMatch) {
       await Lead.create({
-        name: userMessage,
-        phone: userMessage,
+        name: nameMatch ? nameMatch[1] : "Unbekannt",
+        phone: phoneMatch ? phoneMatch[0] : "Unbekannt",
+        appointment: "Noch nicht festgelegt",
         message: userMessage
       });
+
+      console.log("💾 Lead gespeichert");
     }
 
     res.json({ reply });
 
-  } catch (err) {
-    res.json({ reply: "Server Fehler" });
+  } catch (error) {
+    console.log(error);
+    res.json({ reply: "❌ Server Fehler" });
   }
 });
 
-app.listen(3000, () => console.log("Server läuft"));
+// 🌐 Port für Render
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("🔥 Server läuft auf Port " + PORT));
