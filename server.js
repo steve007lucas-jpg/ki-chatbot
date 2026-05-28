@@ -167,6 +167,9 @@ app.post("/save-appointment", async (req, res) => {
 });
 
 // 🚀 SERVER START
-app.listen(3000, () => {
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("Server läuft auf Port " + PORT); {
   console.log("Server läuft auf Port 3000");
 });
