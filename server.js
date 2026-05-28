@@ -5,7 +5,7 @@ const fetch = require("node-fetch");
 const app = express();
 app.use(express.json());
 
-// 🔑 ENV VARS (bei Render setzen)
+// 🔑 ENV VARS
 const MONGO_URI = process.env.MONGO_URI;
 const API_KEY = process.env.OPENROUTER_API_KEY;
 
@@ -14,7 +14,7 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log("MongoDB verbunden"))
   .catch(err => console.log("Mongo Fehler:", err));
 
-// 📦 Session (Memory)
+// 📦 SESSION MEMORY
 const Session = mongoose.model("Session", {
   sessionId: String,
   name: String,
@@ -22,12 +22,16 @@ const Session = mongoose.model("Session", {
   appointment: String
 });
 
-// 📅 Termine
+// 📅 KALENDER DATENBANK
 const Appointment = mongoose.model("Appointment", {
   name: String,
   phone: String,
   date: String,
-  time: String
+  time: String,
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
 });
 
 // 🤖 CHAT ROUTE
@@ -35,7 +39,7 @@ app.post("/chat", async (req, res) => {
   const { message, sessionId } = req.body;
 
   try {
-    // Session laden oder erstellen
+    // 🧠 Session laden / erstellen
     let session = await Session.findOne({ sessionId });
 
     if (!session) {
@@ -47,7 +51,7 @@ app.post("/chat", async (req, res) => {
       });
     }
 
-    // Kontext für KI
+    // 🧠 Kontext für KI
     const context = `
 Bekannte Daten:
 Name: ${session.name || "nicht vorhanden"}
@@ -55,7 +59,7 @@ Telefon: ${session.phone || "nicht vorhanden"}
 Termin: ${session.appointment || "nicht vorhanden"}
 `;
 
-    // KI Anfrage
+    // 🤖 KI Anfrage
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -68,9 +72,9 @@ Termin: ${session.appointment || "nicht vorhanden"}
           {
             role: "system",
             content: `
-Du bist ein Terminassistent.
+Du bist ein professioneller Terminassistent.
 Frage niemals doppelt nach Name oder Telefonnummer.
-Führe zu einem Termin mit Datum und Uhrzeit.
+Sammle alle Daten und bestätige am Ende den Termin.
 
 ${context}
 `
@@ -86,33 +90,43 @@ ${context}
     const data = await response.json();
     const reply = data.choices?.[0]?.message?.content || "Keine Antwort";
 
-    // 🧠 DATEN ERKENNUNG (einfach)
-    if (message.toLowerCase().includes("ich bin") || message.toLowerCase().includes("mein name")) {
+    // 🧠 DATEN ERKENNEN
+
+    // Name erkennen
+    if (
+      message.toLowerCase().includes("ich bin") ||
+      message.toLowerCase().includes("mein name ist")
+    ) {
       session.name = message;
     }
 
+    // Telefonnummer erkennen
     if (message.match(/\+?\d{7,}/)) {
       session.phone = message;
     }
 
-    if (message.toLowerCase().includes("uhr") || message.toLowerCase().includes("morgen") || message.toLowerCase().includes("montag")) {
+    // Termin erkennen
+    if (
+      message.toLowerCase().includes("uhr") ||
+      message.toLowerCase().includes("morgen") ||
+      message.toLowerCase().includes("montag") ||
+      message.toLowerCase().includes("dienstag") ||
+      message.toLowerCase().includes("mittwoch") ||
+      message.toLowerCase().includes("donnerstag") ||
+      message.toLowerCase().includes("freitag")
+    ) {
       session.appointment = message;
     }
 
     await session.save();
 
-    // 📅 Termin speichern wenn alles da ist
+    // 📅 TERMIN SPEICHERN (wenn alles vorhanden)
     if (session.name && session.phone && session.appointment) {
-
-      // einfache Trennung (später verbesserbar)
-      const date = session.appointment;
-      const time = "nicht gesetzt";
-
       await Appointment.create({
         name: session.name,
         phone: session.phone,
-        date,
-        time
+        date: session.appointment,
+        time: "noch nicht getrennt"
       });
     }
 
@@ -124,10 +138,14 @@ ${context}
   }
 });
 
-// 📅 ALLE TERMINE ABRUFEN
+// 📅 ALLE TERMINE ANZEIGEN
 app.get("/appointments", async (req, res) => {
-  const data = await Appointment.find();
-  res.json(data);
+  try {
+    const data = await Appointment.find().sort({ createdAt: -1 });
+    res.json(data);
+  } catch (err) {
+    res.json([]);
+  }
 });
 
 // 📅 TERMIN MANUELL SPEICHERN
