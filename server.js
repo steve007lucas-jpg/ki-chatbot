@@ -1,12 +1,11 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const fetch = require("node-fetch");
-const { google } = require("googleapis");
 
 const app = express();
 app.use(express.json());
 
-// 🔑 ENV VARS (bei Render setzen!)
+// 🔑 ENV VARS (bei Render setzen)
 const MONGO_URI = process.env.MONGO_URI;
 const API_KEY = process.env.OPENROUTER_API_KEY;
 
@@ -15,7 +14,7 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log("MongoDB verbunden"))
   .catch(err => console.log("Mongo Fehler:", err));
 
-// 📦 Session Schema (Memory)
+// 📦 Session (Memory)
 const Session = mongoose.model("Session", {
   sessionId: String,
   name: String,
@@ -23,39 +22,20 @@ const Session = mongoose.model("Session", {
   appointment: String
 });
 
-// 📅 Google Calendar Setup
-const auth = new google.auth.GoogleAuth({
-  keyFile: "credentials.json", // kommt gleich
-  scopes: ["https://www.googleapis.com/auth/calendar"]
+// 📅 Termine
+const Appointment = mongoose.model("Appointment", {
+  name: String,
+  phone: String,
+  date: String,
+  time: String
 });
-
-const calendar = google.calendar({ version: "v3", auth });
-
-// 📅 Termin erstellen
-async function createEvent(session) {
-  await calendar.events.insert({
-    calendarId: "primary",
-    requestBody: {
-      summary: "Neuer Termin",
-      description: `Name: ${session.name}, Tel: ${session.phone}`,
-      start: {
-        dateTime: session.appointment,
-        timeZone: "Europe/Berlin"
-      },
-      end: {
-        dateTime: session.appointment,
-        timeZone: "Europe/Berlin"
-      }
-    }
-  });
-}
 
 // 🤖 CHAT ROUTE
 app.post("/chat", async (req, res) => {
   const { message, sessionId } = req.body;
 
   try {
-    // 🧠 Session laden oder neu erstellen
+    // Session laden oder erstellen
     let session = await Session.findOne({ sessionId });
 
     if (!session) {
@@ -67,7 +47,7 @@ app.post("/chat", async (req, res) => {
       });
     }
 
-    // 🧠 Kontext für KI
+    // Kontext für KI
     const context = `
 Bekannte Daten:
 Name: ${session.name || "nicht vorhanden"}
@@ -75,7 +55,7 @@ Telefon: ${session.phone || "nicht vorhanden"}
 Termin: ${session.appointment || "nicht vorhanden"}
 `;
 
-    // 🤖 KI Anfrage
+    // KI Anfrage
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -89,8 +69,8 @@ Termin: ${session.appointment || "nicht vorhanden"}
             role: "system",
             content: `
 Du bist ein Terminassistent.
-Frage NIEMALS doppelt nach Name oder Telefonnummer.
-Sammle alle Daten und bestätige am Ende den Termin.
+Frage niemals doppelt nach Name oder Telefonnummer.
+Führe zu einem Termin mit Datum und Uhrzeit.
 
 ${context}
 `
@@ -104,10 +84,10 @@ ${context}
     });
 
     const data = await response.json();
-    const reply = data.choices?.[0]?.message?.content;
+    const reply = data.choices?.[0]?.message?.content || "Keine Antwort";
 
-    // 🧠 DATEN ERKENNEN (EINFACH)
-    if (message.toLowerCase().includes("name")) {
+    // 🧠 DATEN ERKENNUNG (einfach)
+    if (message.toLowerCase().includes("ich bin") || message.toLowerCase().includes("mein name")) {
       session.name = message;
     }
 
@@ -115,15 +95,25 @@ ${context}
       session.phone = message;
     }
 
-    if (message.toLowerCase().includes("uhr") || message.toLowerCase().includes("morgen")) {
-      session.appointment = new Date().toISOString(); // später verbessern
+    if (message.toLowerCase().includes("uhr") || message.toLowerCase().includes("morgen") || message.toLowerCase().includes("montag")) {
+      session.appointment = message;
     }
 
     await session.save();
 
-    // 📅 Wenn alles da → Termin erstellen
+    // 📅 Termin speichern wenn alles da ist
     if (session.name && session.phone && session.appointment) {
-      await createEvent(session);
+
+      // einfache Trennung (später verbesserbar)
+      const date = session.appointment;
+      const time = "nicht gesetzt";
+
+      await Appointment.create({
+        name: session.name,
+        phone: session.phone,
+        date,
+        time
+      });
     }
 
     res.json({ reply });
@@ -134,4 +124,31 @@ ${context}
   }
 });
 
-app.listen(3000, () => console.log("Server läuft"));
+// 📅 ALLE TERMINE ABRUFEN
+app.get("/appointments", async (req, res) => {
+  const data = await Appointment.find();
+  res.json(data);
+});
+
+// 📅 TERMIN MANUELL SPEICHERN
+app.post("/save-appointment", async (req, res) => {
+  const { name, phone, date, time } = req.body;
+
+  try {
+    const newAppointment = await Appointment.create({
+      name,
+      phone,
+      date,
+      time
+    });
+
+    res.json({ success: true, appointment: newAppointment });
+  } catch (err) {
+    res.json({ success: false });
+  }
+});
+
+// 🚀 SERVER START
+app.listen(3000, () => {
+  console.log("Server läuft auf Port 3000");
+});
