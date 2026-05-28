@@ -1,182 +1,137 @@
 const express = require("express");
-const fetch = require("node-fetch");
 const mongoose = require("mongoose");
-const cors = require("cors");
+const fetch = require("node-fetch");
+const { google } = require("googleapis");
 
 const app = express();
-
-// Middleware
 app.use(express.json());
-app.use(cors());
 
-// 🔐 ENV Variablen (auf Render einstellen)
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+// 🔑 ENV VARS (bei Render setzen!)
 const MONGO_URI = process.env.MONGO_URI;
+const API_KEY = process.env.OPENROUTER_API_KEY;
 
-// 🔌 MongoDB verbinden
+// 🧠 MongoDB verbinden
 mongoose.connect(MONGO_URI)
-  .then(() => console.log("✅ MongoDB verbunden"))
-  .catch(err => console.log("❌ Mongo Fehler:", err));
+  .then(() => console.log("MongoDB verbunden"))
+  .catch(err => console.log("Mongo Fehler:", err));
 
-// 📦 Datenbank Modell
-const Lead = mongoose.model("Lead", {
+// 📦 Session Schema (Memory)
+const Session = mongoose.model("Session", {
+  sessionId: String,
   name: String,
   phone: String,
-  appointment: String,
-  message: String,
-  createdAt: { type: Date, default: Date.now }
+  appointment: String
 });
 
-// 🧠 SYSTEM PROMPT (SEHR WICHTIG)
-const SYSTEM_PROMPT = `
-Du bist ein hochprofessioneller Terminassistent (wie ein CRM- und Buchungssystem kombiniert).
-
-DEIN HAUPTZIEL:
-Du führst das Gespräch bis zur vollständigen Terminbuchung mit:
-- Name des Kunden
-- Telefonnummer
-- gewünschter Termin (Datum + Uhrzeit)
-- bestätigter Termin am Ende
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-🧠 KRITISCHE REGEL: GEDÄCHTNIS-SIMULATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Du musst alle genannten Informationen IM GESPRÄCH BEHALTEN:
-- Name
-- Telefonnummer
-- Terminwünsche (Datum/Uhrzeit)
-
-👉 Wenn eine Information bereits genannt wurde:
-- FRAGE sie NIEMALS erneut
-- auch wenn der Nutzer später erneut schreibt
-- du darfst sie nur bestätigen oder verwenden
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-📌 GESPRÄCHSLOGIK (FLEXIBEL, NICHT FIXE REIHENFOLGE)
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Du darfst in beliebiger Reihenfolge arbeiten, aber:
-
-1. Sammle fehlende Daten (Name, Telefon, Termin)
-2. Erkenne bereits gegebene Daten automatisch
-3. Frage nur nach fehlenden Informationen
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-📅 TERMINREGELN
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-- Jeder Termin MUSS ein konkretes Datum + Uhrzeit enthalten
-- Wenn der Nutzer keinen Termin nennt:
-  → du schlägst 2 konkrete Optionen vor
-- Keine vagen Aussagen wie „nächste Woche“
-
-Beispiele:
-- "Dienstag 14:00 Uhr"
-- "Freitag 10:30 Uhr"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔁 ANTI-WIEDERHOLUNG (SEHR WICHTIG)
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-- Niemals doppelt nach Name fragen
-- Niemals doppelt nach Telefonnummer fragen
-- Niemals bereits bestätigte Infos erneut abfragen
-
-Wenn Nutzer Infos wiederholt:
-→ bestätige kurz und fahre fort
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-🧾 BEISPIELVERHALTEN
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-User: "Ich brauche einen Termin"
-→ KI: "Gerne! Wann würde es dir passen – Dienstag 14:00 oder Donnerstag 10:30?"
-
-User: "Dienstag"
-→ KI: "Perfekt, Dienstag 14:00 Uhr. Wie ist dein Name?"
-
-User: "Max"
-→ KI: "Danke Max. Kann ich noch deine Telefonnummer bekommen?"
-
-User: "+491234567"
-→ KI: "Super, ich habe alles."
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ ABSCHLUSSREGEL (SEHR WICHTIG)
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Sobald alle Daten vorhanden sind:
-- Name
-- Telefonnummer
-- Termin (Datum + Uhrzeit)
-
-Dann MUSST du antworten:
-
-"Termin bestätigt:
-Name: ...
-Telefon: ...
-Datum & Uhrzeit: ...
-Ich freue mich auf dich!"
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-TON:
-- professionell
-- kurz
-- wie ein echter Empfangsmitarbeiter
-- keine unnötigen Wiederholungen
-`;
-// 🟢 Test Route
-app.get("/", (req, res) => {
-  res.send("🚀 Leadaro Server läuft");
+// 📅 Google Calendar Setup
+const auth = new google.auth.GoogleAuth({
+  keyFile: "credentials.json", // kommt gleich
+  scopes: ["https://www.googleapis.com/auth/calendar"]
 });
 
-// 💬 Chat Route
+const calendar = google.calendar({ version: "v3", auth });
+
+// 📅 Termin erstellen
+async function createEvent(session) {
+  await calendar.events.insert({
+    calendarId: "primary",
+    requestBody: {
+      summary: "Neuer Termin",
+      description: `Name: ${session.name}, Tel: ${session.phone}`,
+      start: {
+        dateTime: session.appointment,
+        timeZone: "Europe/Berlin"
+      },
+      end: {
+        dateTime: session.appointment,
+        timeZone: "Europe/Berlin"
+      }
+    }
+  });
+}
+
+// 🤖 CHAT ROUTE
 app.post("/chat", async (req, res) => {
-  const userMessage = req.body.message;
+  const { message, sessionId } = req.body;
 
   try {
+    // 🧠 Session laden oder neu erstellen
+    let session = await Session.findOne({ sessionId });
+
+    if (!session) {
+      session = await Session.create({
+        sessionId,
+        name: "",
+        phone: "",
+        appointment: ""
+      });
+    }
+
+    // 🧠 Kontext für KI
+    const context = `
+Bekannte Daten:
+Name: ${session.name || "nicht vorhanden"}
+Telefon: ${session.phone || "nicht vorhanden"}
+Termin: ${session.appointment || "nicht vorhanden"}
+`;
+
+    // 🤖 KI Anfrage
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "Authorization": `Bearer ${API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
         model: "openai/gpt-3.5-turbo",
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userMessage }
+          {
+            role: "system",
+            content: `
+Du bist ein Terminassistent.
+Frage NIEMALS doppelt nach Name oder Telefonnummer.
+Sammle alle Daten und bestätige am Ende den Termin.
+
+${context}
+`
+          },
+          {
+            role: "user",
+            content: message
+          }
         ]
       })
     });
 
     const data = await response.json();
-    const reply = data.choices?.[0]?.message?.content || "Keine Antwort";
+    const reply = data.choices?.[0]?.message?.content;
 
-    // 🔎 einfache Daten-Erkennung
-    const phoneMatch = userMessage.match(/\+?\d[\d\s]{5,}/);
-    const nameMatch = userMessage.match(/mein name ist (.+)/i);
+    // 🧠 DATEN ERKENNEN (EINFACH)
+    if (message.toLowerCase().includes("name")) {
+      session.name = message;
+    }
 
-    if (phoneMatch || nameMatch) {
-      await Lead.create({
-        name: nameMatch ? nameMatch[1] : "Unbekannt",
-        phone: phoneMatch ? phoneMatch[0] : "Unbekannt",
-        appointment: "Noch nicht festgelegt",
-        message: userMessage
-      });
+    if (message.match(/\+?\d{7,}/)) {
+      session.phone = message;
+    }
 
-      console.log("💾 Lead gespeichert");
+    if (message.toLowerCase().includes("uhr") || message.toLowerCase().includes("morgen")) {
+      session.appointment = new Date().toISOString(); // später verbessern
+    }
+
+    await session.save();
+
+    // 📅 Wenn alles da → Termin erstellen
+    if (session.name && session.phone && session.appointment) {
+      await createEvent(session);
     }
 
     res.json({ reply });
 
-  } catch (error) {
-    console.log(error);
-    res.json({ reply: "❌ Server Fehler" });
+  } catch (err) {
+    console.log(err);
+    res.json({ reply: "Fehler beim Server" });
   }
 });
 
-// 🌐 Port für Render
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("🔥 Server läuft auf Port " + PORT));
+app.listen(3000, () => console.log("Server läuft"));
